@@ -302,6 +302,14 @@ function calculateVisitMath(serviceIds, phone, priceMode = 'new') {
   return { baseSum, discountRub, finalPrice, matCost, giftCost, taxSelfEmployed, netProfit, loyalty };
 }
 
+function appointmentMath(appt) {
+  if (appt.status === 'completed' && appt.financialSnapshot) return appt.financialSnapshot;
+  const result = calculateVisitMath(appt.serviceIds, appt.phone, appt.priceMode);
+  // Старые визиты не имеют сохранённой цены: не выдаём оценку за чек.
+  if (appt.status === 'completed') result.legacyEstimate = true;
+  return result;
+}
+
 function renderClientServices() {
   const grid = document.getElementById('clientServicesGrid');
   grid.innerHTML = SERVICES.map(s => {
@@ -496,7 +504,7 @@ function renderAdminSchedule() {
   }
 
   list.innerHTML = appts.map(a => {
-    const math = calculateVisitMath(a.serviceIds, a.phone, a.priceMode);
+    const math = appointmentMath(a);
     const srvNames = a.serviceIds.map(id => SERVICES.find(s => s.id === id)?.name).join(', ');
     const isDone = a.status === 'completed';
 
@@ -504,12 +512,12 @@ function renderAdminSchedule() {
       <div class="appt-item ${isDone ? 'completed' : ''}">
         <div class="item-heading">
           <b>📅 ${escapeInventoryText(a.date)} в ${escapeInventoryText(a.time)} — ${escapeInventoryText(a.name)}</b>
-          <span class="badge badge-profit">Чистыми: +${math.netProfit} ₽</span>
+          <span class="badge badge-profit">Чистыми: +${math.netProfit.toFixed(2)} ₽</span>
         </div>
         <div class="appointment-details">📞 ${escapeInventoryText(a.phone)} • ${srvNames}</div>
         ${a.note ? `<div class="appointment-note">💬 ${escapeInventoryText(a.note)}</div>` : ''}
         <div class="appointment-footer">
-          <span class="badge badge-bonus">${math.loyalty.label} • К оплате: ${math.finalPrice} ₽</span>
+          <span class="badge badge-bonus">${math.legacyEstimate ? "Оценка: цена старого визита не сохранена" : escapeInventoryText(math.loyalty.label)} • К оплате: ${math.finalPrice} ₽</span>
           <div class="compact-actions">
             ${!isDone ? `<button class="btn btn-sm complete-appointment-button" data-action="completeAppt" data-appointment-id="${escapeInventoryText(a.id)}">✓ Визит проведен (+щит)</button>` : `<span class="payment-status">✓ Оплачено</span>`}
             <button class="btn btn-outline btn-sm danger-button" data-action="deleteAppt" data-appointment-id="${escapeInventoryText(a.id)}">✕</button>
@@ -527,6 +535,8 @@ function completeAppt(id) {
   const used = inventoryUsage(appt.serviceIds);
   const shortages = used.filter(({item,qty}) => Number(item.stock)<qty).map(({item})=>item.name);
   if(shortages.length && !confirm('Некоторых материалов недостаточно на складе: '+shortages.join(', ')+'.\nЕсли продолжить, остаток станет отрицательным. Провести визит?'))return;
+  // Цена и скидка фиксируются ДО начисления следующего щита.
+  appt.financialSnapshot = calculateVisitMath(appt.serviceIds, appt.phone, appt.priceMode);
   // Списание только при первом завершении записи.
   used.forEach(({item,qty}) => {item.stock=Math.round(((Number(item.stock)||0)-qty)*1000)/1000;});
   appt.stockDeducted = true;
@@ -745,15 +755,16 @@ function renderAdminFinance() {
   let netOp = 0;
   state.appointments.forEach(a => {
     if (a.status === 'cancelled') return;
-    const m = calculateVisitMath(a.serviceIds, a.phone, a.priceMode);
+    const m = appointmentMath(a);
     gross += m.finalPrice;
     netOp += m.netProfit;
   });
   const totalExp = state.expenses.reduce((acc, x) => acc + Number(x.amount || 0), 0);
   const cashFlow = gross - totalExp;
 
-  document.getElementById('finGross').innerText = gross + ' ₽';
-  document.getElementById('finNetOp').innerText = '+' + netOp + ' ₽';
+  const estimate = state.appointments.some(a => a.status === 'completed' && !a.financialSnapshot) ? ' (есть оценочные суммы)' : '';
+  document.getElementById('finGross').innerText = gross.toFixed(2) + ' ₽' + estimate;
+  document.getElementById('finNetOp').innerText = '+' + netOp.toFixed(2) + ' ₽' + estimate;
   document.getElementById('finExpenses').innerText = '-' + totalExp + ' ₽';
   document.getElementById('finCashFlow').innerText = (cashFlow >= 0 ? '+' : '') + cashFlow + ' ₽';
 }
