@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>karna.nails — Онлайн-запись и CRM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Marck+Script&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+<dialog id="adminLoginDialog">
+  <form method="dialog">
+    <h2>Вход мастера</h2>
+    <label for="adminPassword">Пароль мастера</label>
+    <input id="adminPassword" type="password" autocomplete="current-password" maxlength="256" required>
+    <button class="btn" value="login">Войти</button>
+    <button class="btn btn-outline" value="cancel" formnovalidate>Отмена</button>
+  </form>
+</dialog>
+
+<header>
+  <h1 class="script-font">karna.nails</h1>
+  <p>Студия маникюра • м. Сенная площадь</p>
+  <div id="adminBadge" class="mode-badge hidden">Режим Мастера (Админ)</div>
+  <button class="lock-btn" data-action="toggleAdminMode" title="Вход для мастера">🔒</button>
+</header>
+
+<div class="container">
+
+  <!-- ==================== РЕЖИМ КЛИЕНТА (ОНЛАЙН-ЗАПИСЬ) ==================== -->
+  <div id="clientView">
+
+    <!-- Шаг 1: Проверка карты лояльности по телефону -->
+    <div class="card">
+      <div class="card-title script-font">Ваша карта лояльности</div>
+      <label>Телефон для записи:</label>
+      <input type="tel" id="clientPhoneCheck" placeholder="+7 (999) 000-00-00" data-input-action="renderClientLoyalty">
+      <div id="clientLoyaltyStatus" class="loyalty-status">
+        Щиты и скидку проверит мастер.
+      </div>
+      <div class="shields-grid" id="clientShieldsGrid"></div>
+    </div>
+
+    <!-- Шаг 2: Выбор услуг -->
+    <div class="card">
+      <div class="card-title script-font">1. Выберите услуги</div>
+      <div class="service-grid" id="clientServicesGrid"></div>
+    </div>
+
+    <!-- Шаг 3: Выбор даты и свободного времени -->
+    <div class="card">
+      <div class="card-title script-font">2. Дата и свободное время</div>
+      <button class="btn btn-outline" data-action="syncFromCloud">Обновить расписание</button>
+      <label>Выберите дату визита:</label>
+      <input type="date" id="clientDate" data-change-action="renderClientSlots">
+      <label>Свободные окошки:</label>
+      <div class="slots-grid" id="clientSlotsGrid"></div>
+    </div>
+
+    <!-- Шаг 4: Оформление -->
+    <div class="card">
+      <div class="card-title script-font">3. Подтверждение записи</div>
+      <label>Ваше имя:</label>
+      <input type="text" id="clientName" placeholder="Например, Анна">
+      <label>Комментарий (дизайн, снятие, пожелания):</label>
+      <input type="text" id="clientNote" placeholder="Например: хочу френч или ремонт 1 ногтя">
+
+      <div id="clientSummaryBox" class="booking-summary">
+        Выберите услугу и время выше
+      </div>
+
+      <button class="btn" data-action="submitClientBooking">Записаться онлайн</button>
+    </div>
+  </div>
+
+  <!-- ==================== РЕЖИМ АДМИНА (МАСТЕР) ==================== -->
+  <div id="adminView" class="hidden">
+    <!-- Управление плавающим графиком -->
+    <div class="schedule-editor">
+      <h3>🗓 Настройка рабочих часов</h3>
+      <p class="schedule-help">Выберите дату и впишите доступное время через запятую (например: 12:00, 15:30, 18:00). Если оставить поле пустым, день станет выходным.</p>
+      <input type="date" id="adminScheduleDate" data-change-action="loadScheduleForDate" class="schedule-date">
+      <input type="text" id="adminScheduleSlots" placeholder="10:00, 12:00..." class="schedule-slots">
+      <button data-action="saveScheduleForDate" class="schedule-save-button">Сохранить день</button>
+      <span id="scheduleSaveStatus" class="schedule-save-status hidden">Сохранено! ✓</span>
+    </div>
+
+    <!-- ВКЛАДКА 1: КАЛЕНДАРЬ И ЗАПИСИ -->
+    <div id="tabSchedule">
+      <div class="card">
+        <div class="card-title script-font">Расписание и Запись</div>
+        <div class="schedule-filter">
+          <input type="date" id="adminDateFilter" data-change-action="renderAdminSchedule" class="no-bottom-margin">
+          <button class="btn btn-outline btn-sm" data-action="showAllDates">Все дни</button>
+        </div>
+        <div id="adminAppointmentsList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title script-font">Записать клиента вручную</div>
+        <label>Имя клиентки:</label>
+        <input type="text" id="admClientName" placeholder="Имя">
+        <label>Телефон:</label>
+        <input type="tel" id="admClientPhone" placeholder="+7 (999) 000-00-00">
+        <div class="form-grid">
+          <div>
+            <label>Дата:</label>
+            <input type="date" id="admDate">
+          </div>
+          <div>
+            <label>Время:</label>
+            <select id="admTime">
+              <option value="10:00">10:00</option>
+              <option value="12:30">12:30</option>
+              <option value="15:00">15:00</option>
+              <option value="17:30">17:30</option>
+              <option value="20:00">20:00</option>
+            </select>
+          </div>
+        </div>
+        <label>Основная услуга:</label>
+        <select id="admService"></select>
+        <label>Тип прайса:</label>
+        <select id="admPriceMode">
+          <option value="new">Новый прайс (Центр — 2000 ₽ покрытие)</option>
+          <option value="old">Старый прайс (Переходный — 1650 ₽ покрытие)</option>
+        </select>
+        <button class="btn" data-action="addAdminBooking">Добавить запись в календарь</button>
+      </div>
+    </div>
+
+    <!-- ВКЛАДКА 2: КЛИЕНТЫ И КАРТЫ ЛОЯЛЬНОСТИ -->
+    <div id="tabClients" class="hidden">
+      <div class="card">
+        <div class="card-title script-font">База клиентов и 10 щитов</div>
+        <p class="loyalty-help">
+          3 визит: -10% • 5 визит: -20% • 8 и 9 визит: 🎁 Подарок • 10 визит: -30%
+        </p>
+        <div id="adminClientsList"></div>
+      </div>
+    </div>
+
+    <!-- ВКЛАДКА 3: СКЛАД И ЗАКУПКИ -->
+    <div id="tabInventory" class="hidden">
+      <div class="card hidden">
+        <div class="card-title script-font">Старые настройки себестоимости</div>
+        <p class="legacy-cost-help">Для новых расчётов используется каталог ниже. Эти прежние настройки сохранены для совместимости.</p>
+        <div class="form-grid">
+          <div>
+            <label>Одноразовый набор (пилка, баф, пакет), ₽:</label>
+            <input type="number" id="costDisposable" value="65" data-change-action="saveSettings">
+          </div>
+          <div>
+            <label>Порция базы/геля/топа (покрытие), ₽:</label>
+            <input type="number" id="costGel" value="85" data-change-action="saveSettings">
+          </div>
+          <div>
+            <label>Порция для наращивания (формы+гель), ₽:</label>
+            <input type="number" id="costExt" value="160" data-change-action="saveSettings">
+          </div>
+          <div>
+            <label>Себестоимость подарка (8-9 визит), ₽:</label>
+            <input type="number" id="costGift" value="50" data-change-action="saveSettings">
+          </div>
+        </div>
+      </div>
+
+      <!-- Каталог и остатки материалов -->
+      <div class="card">
+        <div class="card-title script-font">Склад: материалы и остатки</div>
+        <p class="inventory-help">
+          Цена указана за упаковку. Остатки — в штуках/мл. Все 18 позиций начинают с нуля.
+          Нормы расхода можно менять для каждой услуги. Многоразовые инструменты не списываются автоматически.
+        </p>
+        <button class="btn inventory-add-button" data-action="addInventoryItem">+ Добавить материал</button>
+        <div id="inventoryCatalog"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title script-font">Журнал закупок (Гели, Фрезы, Аренда)</div>
+        <label>Что купили / оплатили:</label>
+        <input type="text" id="expTitle" placeholder="Напр.: Партия гель-лаков и топ">
+        <div class="form-grid">
+          <div>
+            <label>Сумма (₽):</label>
+            <input type="number" id="expAmount" placeholder="2500">
+          </div>
+          <div>
+            <label>Категория:</label>
+            <select id="expCat">
+              <option value="Материалы (гели/лаки)">Материалы (гели/лаки)</option>
+              <option value="Расходники (пилки/перчатки)">Расходники</option>
+              <option value="Инвентарь и фрезы">Инвентарь и фрезы</option>
+              <option value="Аренда кабинета (Сенная)">Аренда на Сенной</option>
+              <option value="Подарки клиентам">Подарки (8-9 визит)</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn" data-action="addExpense">Внести расход в чеки</button>
+        <div id="expensesList" class="expenses-list"></div>
+      </div>
+    </div>
+
+    <!-- ВКЛАДКА 4: ФИНАНСЫ И GOOGLE ТАБЛИЦА -->
+    <div id="tabFinance" class="hidden">
+      <div class="card">
+        <div class="card-title script-font">Финансы и Чистая прибыль</div>
+        <div class="stat-row">
+          <div class="stat-box">
+            <div class="metric-label">Выручка (по записям)</div>
+            <div class="stat-val" id="finGross">0 ₽</div>
+          </div>
+          <div class="stat-box">
+            <div class="metric-label">Чистая с процедур</div>
+            <div class="stat-val text-success" id="finNetOp">0 ₽</div>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-box">
+            <div class="metric-label">Чеки закупок и аренда</div>
+            <div class="stat-val text-danger" id="finExpenses">0 ₽</div>
+          </div>
+          <div class="stat-box">
+            <div class="metric-label">Реальный остаток (Cash Flow)</div>
+            <div class="stat-val" id="finCashFlow">0 ₽</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title script-font">Связь с Google Таблицей</div>
+        <label>URL веб-приложения Google Apps Script:</label>
+        <input type="url" id="gasUrlInput" readonly placeholder="Адрес задан в app.js">
+        <div class="action-row">
+          <button class="btn btn-outline flex-fill" data-action="syncFromCloud">🔄 Загрузить из Таблицы</button>
+          <button class="btn flex-fill" data-action="syncToCloud">☁️ Выгрузить в Таблицу</button>
+        </div>
+        <p id="syncStatus" class="sync-status"></p>
+      </div>
+    </div>
+
+    <!-- Нижняя панель навигации Мастера -->
+    <div class="admin-nav">
+      <button class="nav-tab active" data-action="switchAdminTab" data-tab="Schedule">📅<span>Записи</span></button>
+      <button class="nav-tab" data-action="switchAdminTab" data-tab="Clients">🛡️<span>Карты (10)</span></button>
+      <button class="nav-tab" data-action="switchAdminTab" data-tab="Inventory">💅<span>Склад</span></button>
+      <button class="nav-tab" data-action="switchAdminTab" data-tab="Finance">💰<span>Прибыль</span></button>
+    </div>
+
+  </div>
+</div>
+
+
+</body>
+</html>
