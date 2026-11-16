@@ -1,4 +1,5 @@
 // Karna Nails: состояние, расчёты, синхронизация и события интерфейса.
+const GOOGLE_CLIENT_ID="625823076976-h393alfat9afn1k239udolvna9i8je1q.apps.googleusercontent.com";
 const SCRIPT_URL="https://script.google.com/macros/s/AKfycbyl5eFj8eKY8flwcjRyen5R3q5_-1EsYO7MQZSTG60iasFkfWVi8QvuDBjvCSXX5NQJIQ/exec";
 // ==================== БАЗОВЫЕ ДАННЫЕ ПРАЙСА ====================
 const SERVICES = [
@@ -436,13 +437,33 @@ async function submitClientBooking() {
   try { await syncFromCloud(); } catch (_) { publicReady=false; renderClientSlots(); }
 }
 
-function askAdminPassword() {
+function askAdminGoogleToken() {
   const dialog=document.getElementById('adminLoginDialog');
-  const input=document.getElementById('adminPassword');
-  input.value=''; dialog.returnValue='';
-  return new Promise(resolve=>{
-    dialog.addEventListener('close',()=>{ const password=dialog.returnValue==='login'?input.value:''; input.value=''; resolve(password); },{once:true});
-    dialog.showModal(); input.focus();
+  if (!window.google || !google.accounts || !google.accounts.id) {
+    throw new Error('Вход Google ещё не загрузился. Проверьте интернет и обновите страницу.');
+  }
+  return new Promise((resolve,reject)=>{
+    const onCancel=()=>resolve(null);
+    dialog.addEventListener('close',onCancel,{once:true});
+    dialog.showModal();
+    const box=document.getElementById('googleSignInButton');
+    box.replaceChildren();
+    try {
+      google.accounts.id.initialize({
+        client_id:GOOGLE_CLIENT_ID,
+        callback:response=>{
+          if (!dialog.open) return;
+          dialog.removeEventListener('close',onCancel);
+          dialog.close();
+          resolve(response && response.credential ? response.credential : null);
+        }
+      });
+      google.accounts.id.renderButton(box,{theme:'outline',size:'large',text:'signin_with',width:280});
+    } catch(error) {
+      dialog.removeEventListener('close',onCancel);
+      dialog.close();
+      reject(error);
+    }
   });
 }
 
@@ -452,9 +473,9 @@ async function toggleAdminMode() {
     finally { clearAdmin(); await syncFromCloud(); }
     return;
   }
-  const password = await askAdminPassword();
-  if (!password) return;
-  const login = await api('login',{password});
+  const idToken = await askAdminGoogleToken();
+  if (!idToken) return;
+  const login = await api('googleLogin',{idToken});
   adminToken = login.token;
   try {
     const result = await api('adminRead',{token:adminToken});
