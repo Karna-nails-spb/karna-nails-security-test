@@ -7,16 +7,16 @@
   <title>karna.nails — Онлайн-запись и CRM</title>
   <link href="https://fonts.googleapis.com/css2?family=Marck+Script&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
-  <script src="app.js?v=9fa1958" defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js?v=google-auth-draft-1" defer></script>
 </head>
 <body>
 <dialog id="adminLoginDialog">
   <form method="dialog">
-    <h2>Вход мастера</h2>
-    <label for="adminPassword">Пароль мастера</label>
-    <input id="adminPassword" type="password" autocomplete="current-password" maxlength="256" required>
-    <button class="btn" value="login">Войти</button>
-    <button class="btn btn-outline" value="cancel" formnovalidate>Отмена</button>
+    <h2>Вход мастера через Google</h2>
+    <p>Выберите разрешённый аккаунт Антона или Карины.</p>
+    <div id="googleSignInButton" aria-label="Вход через Google"></div>
+    <button class="btn btn-outline" value="cancel">Отмена</button>
   </form>
 </dialog>
 
