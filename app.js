@@ -582,9 +582,8 @@ function renderAdminSchedule() {
     if (!grouped.has(a.date)) grouped.set(a.date,[]);
     grouped.get(a.date).push(a);
   });
-  const today=salonNow().slice(0,10);
   list.innerHTML=Array.from(grouped,([date,dayAppointments])=>{
-    const defaultOpen=!!filterDate || date>=today;
+    const defaultOpen=false;
     const isOpen=!!filterDate || (expanded.has(date)?expanded.get(date):defaultOpen);
     const dateLabel=date.split('-').reverse().join('.');
     return `<details class="booking-day" data-date="${escapeInventoryText(date)}" ${isOpen?'open':''}>
