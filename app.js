@@ -22,6 +22,7 @@ let state = {
 
 let selectedClientServices = ['coat'];
 let selectedClientSlot = '';
+let lastClientDate = '';
 let isAdmin = false;
 
 let adminToken='', revision='', dirty=false, blocked=false, uiBusy=false, publicReady=false;
@@ -29,6 +30,7 @@ const ADMIN_ACTIONS = new Set(['saveScheduleForDate','addAdminBooking','addInven
 const API_ERRORS = {
   UNAUTHORIZED:'Нет доступа или сеанс истёк. Войдите снова.', SETUP_REQUIRED:'На сервере ещё не настроен новый пароль мастера.',
   LOGIN_LIMIT:'Слишком много попыток входа. Повторите через 15 минут.', CONFLICT:'База уже изменилась. Загрузите свежие данные и повторите изменение.',
+  DATE_OUT_OF_RANGE:'Онлайн-запись доступна только на текущий и следующий месяц.',
   SLOT_TAKEN:'Это время уже занято. Выберите другое.', SLOT_UNAVAILABLE:'Это время отсутствует в расписании.', PAST_SLOT:'Нельзя записаться на прошедшее время.',
   INVALID_BOOKING:'Проверьте данные записи и длину комментария (до 1000 символов).', INVALID_APPOINTMENT:'Проверьте дату, время, телефон и услуги записей.',
   INVALID_CLIENT:'Проверьте имена, телефоны, визиты и щиты клиентов.', INVALID_SCHEDULE:'В расписании нужны уникальные часы в формате ЧЧ:ММ.',
@@ -38,6 +40,16 @@ const API_ERRORS = {
 function salonNow() {
   const parts = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
   return parts.replace(',', '');
+}
+function clientBookingWindow() {
+  const today=salonNow().slice(0,10);
+  const [year,month]=today.slice(0,7).split('-').map(Number);
+  const lastDay=new Date(Date.UTC(year,month+1,0)).toISOString().slice(0,10);
+  return {today,lastDay};
+}
+function dateOpenForClient(date) {
+  const window=clientBookingWindow();
+  return !!date && date>=window.today && date<=window.lastDay;
 }
 function showSync(text) { const el=document.getElementById('syncStatus'); if(el) el.textContent=text; if(isAdmin) document.getElementById('adminBadge').textContent=text; }
 async function api(action, fields={}) {
@@ -353,8 +365,21 @@ function renderClientSlots() {
   if (!container) return;
   container.innerHTML = '';
 
-  const selectedDate = document.getElementById('clientDate').value;
+  const input=document.getElementById('clientDate');
+  const window=clientBookingWindow();
+  input.min=window.today;
+  input.max=window.lastDay;
+  const selectedDate=input.value;
+  if (selectedDate!==lastClientDate) {
+    selectedClientSlot='';
+    lastClientDate=selectedDate;
+  }
   if (!selectedDate) return;
+  if (!dateOpenForClient(selectedDate)) {
+    container.textContent='Выберите дату в текущем или следующем месяце.';
+    updateClientSummary();
+    return;
+  }
   if (!publicReady && !isAdmin) { container.textContent = 'Расписание не загружено. Нажмите «Обновить расписание».'; return; }
 
   let baseSlots = [];
@@ -419,6 +444,9 @@ async function submitClientBooking() {
   };
   if (!booking.name || !/^\+\d{10,15}$/.test(booking.phone) || !booking.time || !booking.date) {
     alert('Укажите имя, телефон, дату и свободное время.'); return;
+  }
+  if (!dateOpenForClient(booking.date)) {
+    alert('Онлайн-запись доступна только на текущий и следующий месяц.'); return;
   }
   if (!publicReady) throw new Error('Сначала обновите расписание.');
   const fingerprint = JSON.stringify(booking);
@@ -524,7 +552,7 @@ function renderAdminSchedule() {
     return;
   }
 
-  list.innerHTML = appts.map(a => {
+  const renderAppointment = a => {
     const math = appointmentMath(a);
     const srvNames = a.serviceIds.map(id => SERVICES.find(s => s.id === id)?.name).join(', ');
     const isDone = a.status === 'completed';
@@ -546,6 +574,23 @@ function renderAdminSchedule() {
         </div>
       </div>
     `;
+  };
+  // Preserve user-expanded days when the list re-renders after an edit.
+  const expanded=new Map(Array.from(list.querySelectorAll('details.booking-day'),node=>[node.dataset.date,node.open]));
+  const grouped=new Map();
+  appts.forEach(a=>{
+    if (!grouped.has(a.date)) grouped.set(a.date,[]);
+    grouped.get(a.date).push(a);
+  });
+  const today=salonNow().slice(0,10);
+  list.innerHTML=Array.from(grouped,([date,dayAppointments])=>{
+    const defaultOpen=!!filterDate || date>=today;
+    const isOpen=!!filterDate || (expanded.has(date)?expanded.get(date):defaultOpen);
+    const dateLabel=date.split('-').reverse().join('.');
+    return `<details class="booking-day" data-date="${escapeInventoryText(date)}" ${isOpen?'open':''}>
+      <summary><span>📅 ${escapeInventoryText(dateLabel)}</span><span class="booking-day-count">Записей: ${dayAppointments.length}</span></summary>
+      <div class="booking-day-list">${dayAppointments.map(renderAppointment).join('')}</div>
+    </details>`;
   }).join('');
 }
 
@@ -854,7 +899,10 @@ function saveScheduleForDate() {
 function initApp() {
   ensureInventory();
   const today = salonNow().slice(0,10);
-  document.getElementById('clientDate').value = today;
+  const clientDate=document.getElementById('clientDate');
+  clientDate.value=today;
+  clientDate.min=today;
+  clientDate.max=clientBookingWindow().lastDay;
   document.getElementById('admDate').value = today;
   document.getElementById('admService').innerHTML = SERVICES.map(s => `<option value="${s.id}">${s.name} (${s.price} ₽)</option>`).join('');
 
