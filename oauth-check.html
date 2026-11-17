@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Karna Nails CRM — проверка входа</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.5 system-ui, sans-serif; background: #fff4f6; color: #402b34; }
+    main { width: min(560px, calc(100% - 32px)); padding: 32px; border: 1px solid #efd6dd; border-radius: 20px; background: #fff; box-shadow: 0 12px 35px #8b49631a; }
+    h1 { margin: 0 0 14px; font-size: 1.5rem; }
+    p { margin: 10px 0 20px; }
+    button { font: inherit; border: 0; border-radius: 10px; padding: 13px 18px; color: white; background: #85435d; cursor: pointer; }
+    button:disabled { background: #b9a4ad; cursor: wait; }
+    #status { margin-top: 20px; padding: 14px; border-radius: 10px; background: #f9edf1; overflow-wrap: anywhere; }
+    .note { font-size: .9rem; color: #74626b; }
+  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <main>
+    <h1>Проверка входа Karna Nails CRM</h1>
+    <p>Эта страница проверяет подключение нового сервера и вход мастера через Google. Она не создаёт записи и не меняет Google Таблицу.</p>
+    <button id="login" type="button" disabled>Загрузка Google…</button>
+    <div id="status" role="status" aria-live="polite">Ожидание подключения Google.</div>
+    <p class="note">Для проверки используйте один из двух разрешённых аккаунтов. Секретные ключи сюда не вводятся.</p>
+  </main>
+  <script>
+    'use strict';
+    (() => {
+      const CLIENT_ID = '625823076976-h393alfat9afn1k239udolvna9i8je1q.apps.googleusercontent.com';
+      const ENDPOINT = 'https://script.google.com/macros/s/AKfycbyHKb4QKnoBrtZPRBL8necjn8G0iuEo6W49OyRk2omf8ghS4HLGVEjt_E2cKOkla24eJw/exec';
+      const button = document.getElementById('login');
+      const status = document.getElementById('status');
+      let client;
+
+      function message(text) { status.textContent = text; }
+
+      async function request(action, fields = {}) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        try {
+          const response = await fetch(ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action, ...fields }),
+            credentials: 'omit',
+            cache: 'no-store',
+            signal: controller.signal
+          });
+          if (!response.ok) throw new Error('HTTP_' + response.status);
+          const result = await response.json();
+          if (!result || result.ok !== true) throw new Error(result?.error || 'SERVER_ERROR');
+          return result;
+        } finally { clearTimeout(timeout); }
+      }
+
+      async function handleCode(result) {
+        if (!result?.code) {
+          message('Google не предоставил код входа. ' + (result?.error || ''));
+          return;
+        }
+        button.disabled = true;
+        message('Google подтвердил выбор аккаунта. Проверяю доступ к CRM…');
+        let token = '';
+        try {
+          const login = await request('googleCodeLogin', { code: result.code });
+          token = login.token;
+          if (typeof token !== 'string' || !token) throw new Error('NO_SESSION');
+          const snapshot = await request('adminRead', { token });
+          if (!snapshot.data || !snapshot.revision) throw new Error('INVALID_RESPONSE');
+          message('✅ Вход мастера работает. Новый сервер разрешил доступ к CRM. Записи клиентов не менялись.');
+        } catch (error) {
+          message('❌ Проверка не прошла: ' + (error?.message || 'Ошибка соединения') + '. Отправьте мне этот текст, без личных данных и кодов.');
+        } finally {
+          if (token) {
+            try { await request('logout', { token }); } catch (_) { /* Session expires automatically. */ }
+          }
+          button.disabled = false;
+        }
+      }
+
+      window.addEventListener('load', () => {
+        if (!window.google?.accounts?.oauth2?.initCodeClient) {
+          message('Не удалось загрузить Google. Проверьте, что браузер не блокирует accounts.google.com, и обновите страницу.');
+          button.textContent = 'Google недоступен';
+          return;
+        }
+        client = google.accounts.oauth2.initCodeClient({
+          client_id: CLIENT_ID,
+          scope: 'openid email profile',
+          ux_mode: 'popup',
+          select_account: true,
+          callback: handleCode,
+          error_callback: response => message('Google не смог открыть окно входа: ' + (response?.type || 'UNKNOWN_ERROR'))
+        });
+        button.disabled = false;
+        button.textContent = 'Проверить вход через Google';
+        message('Готово к проверке. Нажмите кнопку и выберите свой Google-аккаунт.');
+      });
+      button.addEventListener('click', () => {
+        if (!client) return;
+        message('Открываю окно Google…');
+        client.requestCode();
+      });
+    })();
+  </script>
+</body>
+</html>
