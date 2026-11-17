@@ -26,7 +26,7 @@ let lastClientDate = '';
 let isAdmin = false;
 
 let adminToken='', revision='', dirty=false, blocked=false, uiBusy=false, publicReady=false;
-const ADMIN_ACTIONS = new Set(['saveScheduleForDate','addAdminBooking','addInventoryItem','addExpense','setInventoryStock','restockInventory','editInventoryItem','editInventoryNorms','removeInventoryItem','completeAppt','editAppointmentPayment','deleteAppt','giveOldClientBonus','editClient','deleteClient','saveSettings']);
+const ADMIN_ACTIONS = new Set(['saveScheduleForDate','addAdminBooking','addInventoryItem','addExpense','setInventoryStock','restockInventory','editInventoryItem','editInventoryNorms','removeInventoryItem','completeAppt','editAppointmentPayment','deleteAppt','giveOldClientBonus','editClient','deleteClient','saveSettings','uploadGalleryPhoto','unpublishGalleryPhoto']);
 const API_ERRORS = {
   UNAUTHORIZED:'Нет доступа или сеанс истёк. Войдите снова.', SETUP_REQUIRED:'На сервере ещё не настроен новый пароль мастера.',
   LOGIN_LIMIT:'Слишком много попыток входа. Повторите через 15 минут.', CONFLICT:'База уже изменилась. Загрузите свежие данные и повторите изменение.',
@@ -79,7 +79,7 @@ function clearAdmin() {
     const node=document.getElementById(id); if(node) node.textContent='';
   }
   for (const id of ['admClientName','admClientPhone','admDate','admTime','adminScheduleSlots']) { const node=document.getElementById(id); if(node) node.value=''; }
-  renderClientSlots(); renderClientLoyalty();
+  renderClientSlots(); renderClientLoyalty(); renderGallery();
 }
 async function runUI(action, work) {
   if(uiBusy) return;
@@ -547,7 +547,7 @@ async function toggleAdminMode() {
 }
 
 function switchAdminTab(tabName, btn) {
-  ['Schedule', 'Clients', 'Inventory', 'Finance'].forEach(t => {
+  ['Schedule', 'Clients', 'Inventory', 'Finance', 'Gallery'].forEach(t => {
     document.getElementById('tab' + t).classList.add('hidden');
   });
   document.getElementById('tab' + tabName).classList.remove('hidden');
@@ -562,6 +562,7 @@ function renderAllAdmin() {
   renderAdminExpenses();
   renderInventory();
   renderAdminFinance();
+  renderGallery();
 }
 
 function showAllDates() {
@@ -921,7 +922,7 @@ async function syncFromCloud() {
   state=result.data;
   if (isAdmin) { revision=result.revision; blocked=false; dirty=false; ensureInventory(); renderAllAdmin(); }
   publicReady=true;
-  renderClientSlots(); renderClientLoyalty();
+  renderClientSlots(); renderClientLoyalty(); renderGallery();
   showSync('Данные загружены.');
 }
 
@@ -958,6 +959,150 @@ function saveScheduleForDate() {
 }
 
 
+
+/* Портфолио: в базе только список публикаций, сами фотографии на Drive. */
+const galleryPhotoCache = new Map();
+const galleryPhotoPending = new Map();
+let galleryObserver = null;
+function publishedGallery() {
+  return Array.isArray(state.gallery) ? state.gallery.filter(p=>p && /^[A-Za-z0-9_-]{10,120}$/.test(String(p.id||''))) : [];
+}
+function galleryTile(photo, master) {
+  const id=escapeInventoryText(photo.id);
+  const caption=escapeInventoryText(photo.caption||'');
+  return '<article class="gallery-tile">' +
+    '<button type="button" class="gallery-image-button" data-action="openGalleryPhoto" data-photo-id="'+id+'" aria-label="Посмотреть фотографию '+caption+'">' +
+    '<span class="gallery-placeholder">📷</span>' +
+    '<img class="gallery-image" data-gallery-image="'+id+'" alt="'+caption+'" loading="lazy">' +
+    '</button>' +
+    (caption ? '<p class="gallery-caption">'+caption+'</p>' : '') +
+    (master ? '<button type="button" class="gallery-remove" data-action="unpublishGalleryPhoto" data-photo-id="'+id+'">Убрать из галереи</button>' : '') +
+    '</article>';
+}
+function renderGallery() {
+  const gallery=publishedGallery();
+  const publicCard=document.getElementById('clientGalleryCard');
+  const publicGrid=document.getElementById('clientGalleryGrid');
+  const adminGrid=document.getElementById('adminGalleryGrid');
+  if (!publicCard || !publicGrid || !adminGrid) return;
+  publicCard.classList.toggle('hidden',gallery.length===0);
+  publicGrid.innerHTML=gallery.map(p=>galleryTile(p,false)).join('');
+  adminGrid.innerHTML=gallery.length ? gallery.map(p=>galleryTile(p,true)).join('') :
+    '<p class="gallery-empty">Здесь пока нет фотографий. Добавьте первую работу выше.</p>';
+  if (galleryObserver) galleryObserver.disconnect();
+  const imgs=document.querySelectorAll('[data-gallery-image]');
+  const loadImg=img => {
+    getGalleryPhotoData(img.dataset.galleryImage).then(src=>{
+      if (!img.isConnected) return;
+      img.src=src; img.classList.add('loaded');
+      const placeholder=img.parentElement.querySelector('.gallery-placeholder');
+      if (placeholder) placeholder.classList.add('hidden');
+    }).catch(()=>{
+      if (img.isConnected) img.alt='Не удалось загрузить фото';
+    });
+  };
+  if ('IntersectionObserver' in window) {
+    galleryObserver=new IntersectionObserver(entries=>{
+      entries.forEach(entry=>{
+        if (!entry.isIntersecting) return;
+        galleryObserver.unobserve(entry.target);
+        loadImg(entry.target);
+      });
+    },{rootMargin:'250px'});
+    imgs.forEach(img=>galleryObserver.observe(img));
+  } else imgs.forEach(loadImg);
+}
+async function getGalleryPhotoData(id) {
+  if (galleryPhotoCache.has(id)) return galleryPhotoCache.get(id);
+  if (galleryPhotoPending.has(id)) return galleryPhotoPending.get(id);
+  const task=(async()=>{
+    const response=await fetch(SCRIPT_URL+'?action=photo&id='+encodeURIComponent(id),{
+      credentials:'omit',cache:'no-store',redirect:'follow'
+    });
+    if (!response.ok) throw new Error('Фото временно недоступно');
+    const result=await response.json();
+    if (!result.ok || !['image/jpeg','image/png','image/webp'].includes(result.mime) ||
+        typeof result.data!=='string' || result.data.length>1300000 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(result.data)) throw new Error('Не удалось загрузить фотографию');
+    const src='data:'+result.mime+';base64,'+result.data;
+    galleryPhotoCache.set(id,src);
+    return src;
+  })();
+  galleryPhotoPending.set(id,task);
+  try { return await task; } finally { galleryPhotoPending.delete(id); }
+}
+async function openGalleryPhoto(id) {
+  if (!publishedGallery().some(p=>p.id===id)) return;
+  const photo=publishedGallery().find(p=>p.id===id);
+  const dialog=document.getElementById('galleryLightbox');
+  const img=document.getElementById('galleryLargeImage');
+  img.removeAttribute('src');
+  document.getElementById('galleryLargeCaption').textContent=photo.caption||'';
+  if (!dialog.open) dialog.showModal();
+  try { img.src=await getGalleryPhotoData(id); }
+  catch (error) { dialog.close(); throw error; }
+}
+async function prepareGalleryImage(file) {
+  if (!file || !['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>15000000)
+    throw new Error('Выберите JPG, PNG или WebP размером до 15 МБ.');
+  let image;
+  if (typeof createImageBitmap==='function') image=await createImageBitmap(file);
+  else {
+    image=await new Promise((resolve,reject)=>{
+      const url=URL.createObjectURL(file),img=new Image();
+      img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+      img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Не удалось прочитать изображение'));};
+      img.src=url;
+    });
+  }
+  if (!image.width || !image.height || image.width>10000 || image.height>10000)
+    throw new Error('Неподдерживаемый размер фотографии');
+  const canvas=document.createElement('canvas');
+  const scale=Math.min(1,1200/Math.max(image.width,image.height));
+  canvas.width=Math.max(1,Math.round(image.width*scale));
+  canvas.height=Math.max(1,Math.round(image.height*scale));
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(image,0,0,canvas.width,canvas.height);
+  let data=canvas.toDataURL('image/jpeg',0.78).split(',')[1];
+  if (data.length>1250000) {
+    canvas.width=Math.max(1,Math.round(canvas.width*0.7));
+    canvas.height=Math.max(1,Math.round(canvas.height*0.7));
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    data=canvas.toDataURL('image/jpeg',0.65).split(',')[1];
+  }
+  if (image.close) image.close();
+  if (data.length>1250000) throw new Error('Фотография слишком большая. Выберите другой снимок.');
+  return data;
+}
+async function uploadGalleryPhoto() {
+  const input=document.getElementById('galleryPhotoFile');
+  const file=input.files[0];
+  if (!file) { alert('Сначала выберите фотографию.'); return; }
+  const status=document.getElementById('galleryUploadStatus');
+  status.textContent='Подготавливаю фотографию…';
+  const data=await prepareGalleryImage(file);
+  status.textContent='Загружаю в галерею…';
+  const caption=document.getElementById('galleryPhotoCaption').value.trim();
+  const result=await api('uploadGalleryPhoto',{token:adminToken,revision,mime:'image/jpeg',data,caption});
+  revision=result.revision;
+  state.gallery=[result.photo,...publishedGallery()];
+  input.value='';
+  document.getElementById('galleryPhotoCaption').value='';
+  status.textContent='✓ Фотография опубликована.';
+  renderGallery();
+}
+async function unpublishGalleryPhoto(id) {
+  if (!confirm('Убрать фотографию из галереи? Файл останется в закрытой папке Drive.')) return;
+  const result=await api('unpublishGalleryPhoto',{token:adminToken,revision,id});
+  revision=result.revision;
+  state.gallery=publishedGallery().filter(p=>p.id!==id);
+  galleryPhotoCache.delete(id);
+  renderGallery();
+  document.getElementById('galleryUploadStatus').textContent='Фотография убрана из галереи.';
+}
+
 function initApp() {
   ensureInventory();
   const today = salonNow().slice(0,10);
@@ -976,6 +1121,7 @@ function initApp() {
   renderClientServices();
   renderClientLoyalty();
   renderClientSlots();
+  renderGallery();
   syncFromCloud().catch(error=>{ publicReady=false; renderClientSlots(); alert(error.message); });
 }
 
@@ -1004,7 +1150,10 @@ function bindUIEvents() {
     deleteAppt: element => deleteAppt(Number(element.dataset.appointmentId)),
     giveOldClientBonus: element => giveOldClientBonus(element.dataset.phone),
     editClient: element => editClient(element.dataset.phone),
-    deleteClient: element => deleteClient(element.dataset.phone)
+    deleteClient: element => deleteClient(element.dataset.phone),
+    uploadGalleryPhoto,
+    unpublishGalleryPhoto: element => unpublishGalleryPhoto(element.dataset.photoId),
+    openGalleryPhoto: element => openGalleryPhoto(element.dataset.photoId)
   };
   const changeActions = {
     renderClientSlots,
