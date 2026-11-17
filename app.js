@@ -1,6 +1,6 @@
 // Karna Nails: состояние, расчёты, синхронизация и события интерфейса.
 const GOOGLE_CLIENT_ID="625823076976-h393alfat9afn1k239udolvna9i8je1q.apps.googleusercontent.com";
-const SCRIPT_URL="https://script.google.com/macros/s/AKfycbyl5eFj8eKY8flwcjRyen5R3q5_-1EsYO7MQZSTG60iasFkfWVi8QvuDBjvCSXX5NQJIQ/exec";
+const SCRIPT_URL="https://script.google.com/macros/s/AKfycbyHKb4QKnoBrtZPRBL8necjn8G0iuEo6W49OyRk2omf8ghS4HLGVEjt_E2cKOkla24eJw/exec";
 // ==================== БАЗОВЫЕ ДАННЫЕ ПРАЙСА ====================
 const SERVICES = [
   { id: 'coat', name: 'Маникюр с покрытием', price: 2000, oldPrice: 1650, dur: '2 ч', matType: 'gel' },
@@ -465,33 +465,49 @@ async function submitClientBooking() {
   try { await syncFromCloud(); } catch (_) { publicReady=false; renderClientSlots(); }
 }
 
-function askAdminGoogleToken() {
+function askAdminGoogleCode() {
   const dialog=document.getElementById('adminLoginDialog');
-  if (!window.google || !google.accounts || !google.accounts.id) {
+  if (!window.google?.accounts?.oauth2?.initCodeClient) {
     throw new Error('Вход Google ещё не загрузился. Проверьте интернет и обновите страницу.');
   }
   return new Promise((resolve,reject)=>{
-    const onCancel=()=>resolve(null);
+    let settled=false;
+    const finish=(code,error)=>{
+      if(settled) return;
+      settled=true;
+      dialog.removeEventListener('close',onCancel);
+      if(dialog.open) dialog.close();
+      if(error) reject(error); else resolve(code);
+    };
+    const onCancel=()=>finish(null);
     dialog.addEventListener('close',onCancel,{once:true});
     dialog.showModal();
     const box=document.getElementById('googleSignInButton');
     box.replaceChildren();
-    try {
-      google.accounts.id.initialize({
-        client_id:GOOGLE_CLIENT_ID,
-        callback:response=>{
-          if (!dialog.open) return;
-          dialog.removeEventListener('close',onCancel);
-          dialog.close();
-          resolve(response && response.credential ? response.credential : null);
-        }
-      });
-      google.accounts.id.renderButton(box,{theme:'outline',size:'large',text:'signin_with',width:280});
-    } catch(error) {
-      dialog.removeEventListener('close',onCancel);
-      dialog.close();
-      reject(error);
-    }
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='btn';
+    button.textContent='Войти через Google';
+    button.addEventListener('click',()=>{
+      button.disabled=true;
+      try {
+        const client=google.accounts.oauth2.initCodeClient({
+          client_id:GOOGLE_CLIENT_ID,
+          scope:'openid email profile',
+          ux_mode:'popup',
+          callback:response=>{
+            if(response?.code) finish(response.code);
+            else finish(null,new Error('Google не предоставил код входа.'));
+          },
+          error_callback:error=>{
+            if(error?.type==='popup_closed') {button.disabled=false; return;}
+            finish(null,new Error('Не удалось открыть окно Google. Попробуйте ещё раз.'));
+          }
+        });
+        client.requestCode({prompt:'select_account'});
+      } catch(error) {finish(null,error);}
+    });
+    box.append(button);
   });
 }
 
@@ -501,9 +517,9 @@ async function toggleAdminMode() {
     finally { clearAdmin(); await syncFromCloud(); }
     return;
   }
-  const idToken = await askAdminGoogleToken();
-  if (!idToken) return;
-  const login = await api('googleLogin',{idToken});
+  const code = await askAdminGoogleCode();
+  if (!code) return;
+  const login = await api('googleCodeLogin',{code});
   adminToken = login.token;
   try {
     const result = await api('adminRead',{token:adminToken});
