@@ -26,7 +26,7 @@ let lastClientDate = '';
 let isAdmin = false;
 
 let adminToken='', revision='', dirty=false, blocked=false, uiBusy=false, publicReady=false;
-const ADMIN_ACTIONS = new Set(['saveScheduleForDate','addAdminBooking','addInventoryItem','addExpense','setInventoryStock','restockInventory','editInventoryItem','editInventoryNorms','removeInventoryItem','completeAppt','deleteAppt','giveOldClientBonus','editClient','deleteClient','saveSettings']);
+const ADMIN_ACTIONS = new Set(['saveScheduleForDate','addAdminBooking','addInventoryItem','addExpense','setInventoryStock','restockInventory','editInventoryItem','editInventoryNorms','removeInventoryItem','completeAppt','editAppointmentPayment','deleteAppt','giveOldClientBonus','editClient','deleteClient','saveSettings']);
 const API_ERRORS = {
   UNAUTHORIZED:'Нет доступа или сеанс истёк. Войдите снова.', SETUP_REQUIRED:'На сервере ещё не настроен новый пароль мастера.',
   LOGIN_LIMIT:'Слишком много попыток входа. Повторите через 15 минут.', CONFLICT:'База уже изменилась. Загрузите свежие данные и повторите изменение.',
@@ -315,12 +315,24 @@ function calculateVisitMath(serviceIds, phone, priceMode = 'new') {
   return { baseSum, discountRub, finalPrice, matCost, giftCost, taxSelfEmployed, netProfit, loyalty };
 }
 
+// Optional actual payment is stored per appointment, never as a client discount.
+function hasManualPayment(appt) {
+  return typeof appt.paidAmount === 'number' && Number.isFinite(appt.paidAmount)
+    && appt.paidAmount >= 0 && appt.paidAmount <= 1000000;
+}
+function withActualPayment(math, amount) {
+  const finalPrice = Math.round(amount * 100) / 100;
+  const taxSelfEmployed = Math.round(finalPrice * 0.04);
+  const netProfit = finalPrice - (Number(math.matCost) || 0)
+    - (Number(math.giftCost) || 0) - taxSelfEmployed;
+  return {...math, finalPrice, taxSelfEmployed, netProfit, paidManually:true};
+}
 function appointmentMath(appt) {
   if (appt.status === 'completed' && appt.financialSnapshot) return appt.financialSnapshot;
   const result = calculateVisitMath(appt.serviceIds, appt.phone, appt.priceMode);
   // Старые визиты не имеют сохранённой цены: не выдаём оценку за чек.
   if (appt.status === 'completed') result.legacyEstimate = true;
-  return result;
+  return hasManualPayment(appt) ? withActualPayment(result, appt.paidAmount) : result;
 }
 
 function renderClientServices() {
@@ -572,19 +584,22 @@ function renderAdminSchedule() {
     const math = appointmentMath(a);
     const srvNames = a.serviceIds.map(id => SERVICES.find(s => s.id === id)?.name).join(', ');
     const isDone = a.status === 'completed';
+    const moneyLabel = isDone ? 'Получено' : 'К оплате';
+    const manualPaymentLabel = hasManualPayment(a) ? ' • сумма указана мастером' : '';
 
     return `
       <div class="appt-item ${isDone ? 'completed' : ''}">
         <div class="item-heading">
           <b>📅 ${escapeInventoryText(a.date)} в ${escapeInventoryText(a.time)} — ${escapeInventoryText(a.name)}</b>
-          <span class="badge badge-profit">Чистыми: +${math.netProfit.toFixed(2)} ₽</span>
+          <span class="badge badge-profit">Чистыми: ${math.netProfit >= 0 ? '+' : ''}${math.netProfit.toFixed(2)} ₽</span>
         </div>
         <div class="appointment-details">📞 ${escapeInventoryText(a.phone)} • ${srvNames}</div>
         ${a.note ? `<div class="appointment-note">💬 ${escapeInventoryText(a.note)}</div>` : ''}
         <div class="appointment-footer">
-          <span class="badge badge-bonus">${math.legacyEstimate ? "Оценка: цена старого визита не сохранена" : escapeInventoryText(math.loyalty.label)} • К оплате: ${math.finalPrice} ₽</span>
+          <span class="badge badge-bonus">${math.legacyEstimate ? "Оценка: цена старого визита не сохранена" : escapeInventoryText(math.loyalty.label)} • ${moneyLabel}: ${math.finalPrice} ₽${manualPaymentLabel}</span>
           <div class="compact-actions">
             ${!isDone ? `<button class="btn btn-sm complete-appointment-button" data-action="completeAppt" data-appointment-id="${escapeInventoryText(a.id)}">✓ Визит проведен (+щит)</button>` : `<span class="payment-status">✓ Оплачено</span>`}
+            ${a.status !== 'cancelled' ? `<button class="btn btn-outline btn-sm" data-action="editAppointmentPayment" data-appointment-id="${escapeInventoryText(a.id)}">💰 Изменить сумму</button>` : ''}
             <button class="btn btn-outline btn-sm danger-button" data-action="deleteAppt" data-appointment-id="${escapeInventoryText(a.id)}">✕</button>
           </div>
         </div>
@@ -617,7 +632,7 @@ function completeAppt(id) {
   const shortages = used.filter(({item,qty}) => Number(item.stock)<qty).map(({item})=>item.name);
   if(shortages.length && !confirm('Некоторых материалов недостаточно на складе: '+shortages.join(', ')+'.\nЕсли продолжить, остаток станет отрицательным. Провести визит?'))return;
   // Цена и скидка фиксируются ДО начисления следующего щита.
-  appt.financialSnapshot = calculateVisitMath(appt.serviceIds, appt.phone, appt.priceMode);
+  appt.financialSnapshot = appointmentMath(appt);
   // Списание только при первом завершении записи.
   used.forEach(({item,qty}) => {item.stock=Math.round(((Number(item.stock)||0)-qty)*1000)/1000;});
   appt.stockDeducted = true;
@@ -627,6 +642,37 @@ function completeAppt(id) {
     state.clients[appt.phone] = { name: appt.name, phone: appt.phone, visits: 0, bonusStamps: 0, formula: '' };
   }
   state.clients[appt.phone].visits = (state.clients[appt.phone].visits || 0) + 1;
+  saveState();
+  renderAllAdmin();
+}
+
+function editAppointmentPayment(id) {
+  if (!isAdmin) return;
+  const appt = state.appointments.find(a => a.id === id);
+  if (!appt || appt.status === 'cancelled') return;
+  const current = appointmentMath(appt).finalPrice;
+  const input = prompt('Сколько рублей фактически получили за эту запись?\nМожно указать 0, если визит был бесплатным.', String(current));
+  if (input === null) return;
+  const normalized = input.trim().replace(',', '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) {
+    alert('Укажите сумму в рублях: 500 или 500,50. Отрицательная сумма недопустима.');
+    return;
+  }
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount > 1000000) {
+    alert('Сумма должна быть от 0 до 1 000 000 ₽.');
+    return;
+  }
+  if (hasManualPayment(appt) && appt.paidAmount === amount) return;
+  // Editing an old completed visit must not deduct stock or award loyalty again.
+  if (appt.status === 'completed') {
+    const hadSnapshot = !!appt.financialSnapshot;
+    const previous = hadSnapshot ? appt.financialSnapshot
+      : calculateVisitMath(appt.serviceIds, appt.phone, appt.priceMode);
+    appt.financialSnapshot = withActualPayment(previous, amount);
+    if (!hadSnapshot) appt.financialSnapshot.legacyEstimate = true;
+  }
+  appt.paidAmount = amount;
   saveState();
   renderAllAdmin();
 }
@@ -953,6 +999,7 @@ function bindUIEvents() {
     editInventoryNorms: element => editInventoryNorms(element.dataset.itemId),
     removeInventoryItem: element => removeInventoryItem(element.dataset.itemId),
     completeAppt: element => completeAppt(Number(element.dataset.appointmentId)),
+    editAppointmentPayment: element => editAppointmentPayment(Number(element.dataset.appointmentId)),
     deleteAppt: element => deleteAppt(Number(element.dataset.appointmentId)),
     giveOldClientBonus: element => giveOldClientBonus(element.dataset.phone),
     editClient: element => editClient(element.dataset.phone),
