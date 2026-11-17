@@ -65,15 +65,17 @@
         button.disabled = true;
         message('Google подтвердил выбор аккаунта. Проверяю доступ к CRM…');
         let token = '';
+        let stage = 'googleCodeLogin';
         try {
           const login = await request('googleCodeLogin', { code: result.code });
           token = login.token;
           if (typeof token !== 'string' || !token) throw new Error('NO_SESSION');
+          stage = 'adminRead';
           const snapshot = await request('adminRead', { token });
           if (!snapshot.data || !snapshot.revision) throw new Error('INVALID_RESPONSE');
           message('✅ Вход мастера работает. Новый сервер разрешил доступ к CRM. Записи клиентов не менялись.');
         } catch (error) {
-          message('❌ Проверка не прошла: ' + (error?.message || 'Ошибка соединения') + '. Отправьте мне этот текст, без личных данных и кодов.');
+          message('❌ Ошибка на этапе ' + stage + ': ' + (error?.message || 'Ошибка соединения') + '. Отправьте мне этот текст, без личных данных и кодов.');
         } finally {
           if (token) {
             try { await request('logout', { token }); } catch (_) { /* Session expires automatically. */ }
