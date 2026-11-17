@@ -6,9 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>karna.nails — Онлайн-запись и CRM</title>
   <link href="https://fonts.googleapis.com/css2?family=Marck+Script&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=desktop-grid-1">
+  <link rel="stylesheet" href="styles.css?v=portfolio-1">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=completed-revenue-1" defer></script>
+  <script src="app.js?v=portfolio-1" defer></script>
 </head>
 <body>
 <dialog id="adminLoginDialog">
@@ -18,6 +18,11 @@
     <div id="googleSignInButton" aria-label="Вход через Google"></div>
     <button class="btn btn-outline" value="cancel">Отмена</button>
   </form>
+</dialog>
+<dialog id="galleryLightbox" class="gallery-lightbox">
+  <form method="dialog"><button class="gallery-lightbox-close" aria-label="Закрыть">✕</button></form>
+  <img id="galleryLargeImage" alt="Пример работы мастера">
+  <p id="galleryLargeCaption"></p>
 </dialog>
 
 <header>
@@ -72,6 +77,11 @@
       </div>
 
       <button class="btn" data-action="submitClientBooking">Записаться онлайн</button>
+    </div>
+
+    <div class="card gallery-card hidden" id="clientGalleryCard">
+      <div class="card-title script-font">Примеры наших работ</div>
+      <div class="gallery-grid" id="clientGalleryGrid"></div>
     </div>
   </div>
 
@@ -241,12 +251,28 @@
       </div>
     </div>
 
+    <!-- ГАЛЕРЕЯ МАСТЕРА -->
+    <div id="tabGallery" class="hidden">
+      <div class="card">
+        <div class="card-title script-font">📸 Мои работы</div>
+        <p class="gallery-help">Добавленные фотографии увидят посетители сайта. Файл хранится отдельно от клиентской базы.</p>
+        <label for="galleryPhotoFile">Фотография (JPG, PNG или WebP):</label>
+        <input type="file" id="galleryPhotoFile" accept="image/jpeg,image/png,image/webp">
+        <label for="galleryPhotoCaption">Подпись (необязательно):</label>
+        <input type="text" id="galleryPhotoCaption" maxlength="120" placeholder="Например: нежный френч">
+        <button class="btn" data-action="uploadGalleryPhoto">+ Добавить фотографию</button>
+        <p id="galleryUploadStatus" class="sync-status" role="status"></p>
+        <div class="gallery-grid" id="adminGalleryGrid"></div>
+      </div>
+    </div>
+
     <!-- Нижняя панель навигации Мастера -->
     <div class="admin-nav">
       <button class="nav-tab active" data-action="switchAdminTab" data-tab="Schedule">📅<span>Записи</span></button>
       <button class="nav-tab" data-action="switchAdminTab" data-tab="Clients">🛡️<span>Карты (10)</span></button>
       <button class="nav-tab" data-action="switchAdminTab" data-tab="Inventory">💅<span>Склад</span></button>
       <button class="nav-tab" data-action="switchAdminTab" data-tab="Finance">💰<span>Прибыль</span></button>
+      <button class="nav-tab" data-action="switchAdminTab" data-tab="Gallery">📸<span>Фото</span></button>
     </div>
 
   </div>
