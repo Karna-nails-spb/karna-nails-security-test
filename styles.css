@@ -200,3 +200,16 @@ label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; 
 .expense-category { color:var(--muted); font-size:11px; }
 .expense-amount { color:var(--danger); font-weight:600; }
 .text-accent { color:var(--accent-dark); }
+
+/* Desktop layout: two readable columns. Small screens keep the original flow. */
+@media (min-width: 900px) {
+  .container { max-width: 1160px; padding: 24px 24px 44px; }
+  #clientView {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 20px;
+  }
+  #clientView > .card { width: 100%; margin-bottom: 0; }
+  #adminView { max-width: 820px; margin: 0 auto; }
+}
