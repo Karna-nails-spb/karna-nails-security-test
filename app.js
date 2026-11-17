@@ -881,7 +881,8 @@ function renderAdminFinance() {
   let gross = 0;
   let netOp = 0;
   state.appointments.forEach(a => {
-    if (a.status === 'cancelled') return;
+    // Запись сама по себе не означает оплату. Учитываем только проведённые визиты.
+    if (a.status !== 'completed') return;
     const m = appointmentMath(a);
     gross += m.finalPrice;
     netOp += m.netProfit;
@@ -889,9 +890,9 @@ function renderAdminFinance() {
   const totalExp = state.expenses.reduce((acc, x) => acc + Number(x.amount || 0), 0);
   const cashFlow = gross - totalExp;
 
-  const estimate = state.appointments.some(a => a.status === 'completed' && !a.financialSnapshot) ? ' (есть оценочные суммы)' : '';
+  const estimate = state.appointments.some(a => a.status === 'completed' && (!a.financialSnapshot || a.financialSnapshot.legacyEstimate)) ? ' (есть оценочные суммы)' : '';
   document.getElementById('finGross').innerText = gross.toFixed(2) + ' ₽' + estimate;
-  document.getElementById('finNetOp').innerText = '+' + netOp.toFixed(2) + ' ₽' + estimate;
+  document.getElementById('finNetOp').innerText = (netOp >= 0 ? '+' : '') + netOp.toFixed(2) + ' ₽' + estimate;
   document.getElementById('finExpenses').innerText = '-' + totalExp + ' ₽';
   document.getElementById('finCashFlow').innerText = (cashFlow >= 0 ? '+' : '') + cashFlow + ' ₽';
 }
